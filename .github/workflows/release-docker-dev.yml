@@ -25,7 +25,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: x64-docker-build-node
+          - runner: x64-docker-build-node-test
             platform: linux/amd64
             build_type: all
             grace_blackwell: 0
@@ -37,7 +37,7 @@ jobs:
             grace_blackwell: 1
             arch_tag: arm64
             version: 12.9.1
-          - runner: x64-docker-build-node
+          - runner: x64-docker-build-node-test
             platform: linux/amd64
             build_type: all
             grace_blackwell: 0
