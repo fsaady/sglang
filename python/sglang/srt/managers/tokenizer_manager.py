@@ -2071,23 +2071,25 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         if (
             hasattr(recv_obj, "spec_verify_ct")
             and recv_obj.spec_verify_ct[i] > 0
-            and hasattr(recv_obj, "spec_accepted_tokens")
-            and len(recv_obj.spec_accepted_tokens) > i
+            and hasattr(recv_obj, "spec_accepted_drafts")
+            and len(recv_obj.spec_accepted_drafts) > i
         ):
-            # The draft tokens per speculative step (excluding the target-sampled token).
-            num_guess_tokens = self.server_args.speculative_num_draft_tokens - 1
-            total_draft_tokens = recv_obj.spec_verify_ct[i] * num_guess_tokens
-            accepted_tokens = recv_obj.spec_accepted_tokens[i]
+            # Proposed drafts per verify step (excluding the target-sampled slot).
+            num_proposed_drafts = self.server_args.speculative_num_draft_tokens - 1
+            total_proposed_drafts = recv_obj.spec_verify_ct[i] * num_proposed_drafts
+            accepted_drafts = recv_obj.spec_accepted_drafts[i]
 
             # Calculate per-request acceptance rate and average acceptance length.
-            if total_draft_tokens > 0:
-                # Calculate acceptance rate: accepted / (steps * lookahead)
-                meta_info["spec_accept_rate"] = accepted_tokens / total_draft_tokens
+            if total_proposed_drafts > 0:
+                # accept_rate: accepted_drafts / total_proposed_drafts (strict count, no bonus).
+                meta_info["spec_accept_rate"] = accepted_drafts / total_proposed_drafts
+                # accept_length: accepted_tokens / verify_ct (includes bonus token).
                 meta_info["spec_accept_length"] = (
                     recv_obj.completion_tokens[i] / recv_obj.spec_verify_ct[i]
                 )
-                meta_info["spec_accept_token_num"] = accepted_tokens
-                meta_info["spec_draft_token_num"] = total_draft_tokens
+                # Legacy external key names retained; values are drafts-only.
+                meta_info["spec_accept_token_num"] = accepted_drafts
+                meta_info["spec_draft_token_num"] = total_proposed_drafts
                 meta_info["spec_verify_ct"] = recv_obj.spec_verify_ct[i]
 
             # Acceptance histogram: tracks how many decoding steps accepted a certain number of draft tokens.
