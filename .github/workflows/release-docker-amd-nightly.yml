@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'sgl-project/sglang'
+    if: false  # temporarily skip build
     runs-on: amd-docker-scale
     environment: 'prod'
     strategy:
@@ -151,7 +151,7 @@ jobs:
       - name: Mirror rocm/sgl-dev to local registry
         run: |
           src="rocm/sgl-dev:${{ env.IMAGE_TAG }}"
-          dst="172.29.8.23:5000/rocm/sgl-dev:${{ env.IMAGE_TAG }}"
+          dst="10.245.143.50:5000/rocm/sgl-dev:${{ env.IMAGE_TAG }}"
           docker pull "${src}"
           docker tag "${src}" "${dst}"
           docker push "${dst}"
