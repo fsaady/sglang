@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import nullcontext
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -41,6 +42,7 @@ from sglang.srt.batch_overlap.two_batch_overlap import (
 from sglang.srt.configs.model_config import (
     compute_mla_mscale_scaling,
     dsa_layer_skips_topk,
+    get_dsa_safe_pp_layer_partition,
     get_dsa_index_head_dim,
     get_dsa_index_n_heads,
     get_dsa_index_topk,
@@ -184,6 +186,7 @@ from sglang.srt.utils import (
     add_prefix,
     is_non_idle_and_non_empty,
     log_info_on_rank0,
+    log_warning_on_rank0,
     make_layers,
     use_intel_amx_backend,
 )
@@ -2369,6 +2372,35 @@ class DeepseekV2Model(nn.Module):
             else None
         )
 
+        dsa_pp_layer_partition = None
+        if (
+            self.use_dsa
+            and self.pp_group.world_size > 1
+            and os.getenv("SGLANG_PP_LAYER_PARTITION") is None
+        ):
+            dsa_pp_layer_partition = get_dsa_safe_pp_layer_partition(
+                config, self.pp_group.world_size
+            )
+            if dsa_pp_layer_partition is not None:
+                log_info_on_rank0(
+                    logger,
+                    "Using DSA-safe PP layer partition for "
+                    f"{config.num_hidden_layers} layers across "
+                    f"{self.pp_group.world_size} stages: "
+                    f"{','.join(str(layer) for layer in dsa_pp_layer_partition)}",
+                )
+            else:
+                log_warning_on_rank0(
+                    logger,
+                    "Could not find a DSA-safe PP layer partition for "
+                    f"{config.num_hidden_layers} layers across "
+                    f"{self.pp_group.world_size} stages; falling back to the "
+                    "default balanced split. A stage may start on a skip-topk "
+                    "layer and fail. Set SGLANG_PP_LAYER_PARTITION explicitly "
+                    "so every stage (after the first) starts on a layer that "
+                    "computes its own DSA top-k.",
+                )
+
         self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,
             lambda idx, prefix: DeepseekV2DecoderLayer(
@@ -2382,6 +2414,7 @@ class DeepseekV2Model(nn.Module):
             ),
             pp_rank=self.pp_group.rank_in_group,
             pp_size=self.pp_group.world_size,
+            pp_layer_partition=dsa_pp_layer_partition,
             prefix=add_prefix("layers", prefix),
             offloader_kwargs=dict(
                 submodule_accessor=lambda layer: (

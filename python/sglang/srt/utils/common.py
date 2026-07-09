@@ -718,6 +718,7 @@ def make_layers(
     layer_fn: LayerFn,
     pp_rank: Optional[int] = None,
     pp_size: Optional[int] = None,
+    pp_layer_partition: Optional[Sequence[int]] = None,
     prefix: str = "",
     return_tuple: bool = False,
     offloader_kwargs: Optional[Dict[str, Any]] = None,
@@ -734,6 +735,7 @@ def make_layers(
             num_hidden_layers,
             pp_rank,
             pp_size,
+            partition_list=pp_layer_partition,
         )
         if pp_rank is not None and pp_size is not None
         else (0, num_hidden_layers)
@@ -3140,6 +3142,24 @@ def log_debug_on_rank0(logger, msg):
                 logger.debug(f"{msg} (rank-check failed: {e})")
         else:
             logger.debug(f"{msg} (rank-check failed: {e})")
+
+
+def log_warning_on_rank0(logger, msg):
+    """
+    Log a warning message only on tensor model parallel rank 0.
+    Falls back to logging if distributed is not initialized or error occurs.
+    """
+    from sglang.srt.distributed import get_tensor_model_parallel_rank
+
+    try:
+        if torch.distributed.is_initialized() and get_tensor_model_parallel_rank() == 0:
+            logger.warning(msg)
+    except Exception as e:
+        if torch.distributed.is_initialized():
+            if torch.distributed.get_rank() == 0:
+                logger.warning(f"{msg} (rank-check failed: {e})")
+        else:
+            logger.warning(f"{msg} (rank-check failed: {e})")
 
 
 def load_json_config(data: str):

@@ -19,7 +19,7 @@ import math
 import os
 from enum import Enum, IntEnum, auto
 from pathlib import Path
-from typing import Any, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 from transformers import PretrainedConfig
@@ -198,6 +198,68 @@ def dsa_layer_skips_topk(config: PretrainedConfig, layer_id: int) -> bool:
         return max(layer_id - offset + 1, 0) % freq != 0
 
     return max(layer_id - 1, 0) % freq != 0
+
+
+def get_dsa_safe_pp_layer_partition(
+    config: PretrainedConfig, pp_size: int
+) -> Optional[List[int]]:
+    """Choose balanced PP partitions whose stage starts compute DSA top-k."""
+    if pp_size <= 1 or not is_deepseek_dsa(config):
+        return None
+
+    num_layers = config.num_hidden_layers
+    if num_layers < pp_size:
+        return None
+
+    memo: Dict[Tuple[int, int], Optional[List[int]]] = {}
+
+    def search(rank: int, previous_boundary: int) -> Optional[List[int]]:
+        """Pick stage boundaries for ranks ``rank..pp_size-1``.
+
+        Each boundary is the first layer index of a PP stage. It must not be a
+        skip-topk layer, or the next stage would need top-k indices from the
+        prior stage. Candidates are tried in order of distance to the balanced
+        target; backtracking is required because a locally best boundary can
+        leave no safe option for a later stage.
+        """
+        if rank == pp_size:
+            return [] if previous_boundary < num_layers else None
+
+        key = (rank, previous_boundary)
+        if key in memo:
+            return memo[key]
+
+        remaining_stages = pp_size - rank
+        min_boundary = previous_boundary + 1
+        max_boundary = num_layers - remaining_stages
+        target = num_layers * rank / pp_size
+
+        candidates = [
+            boundary
+            for boundary in range(min_boundary, max_boundary + 1)
+            if not dsa_layer_skips_topk(config, boundary)
+        ]
+        candidates.sort(key=lambda boundary: (abs(boundary - target), boundary))
+
+        for boundary in candidates:
+            suffix = search(rank + 1, boundary)
+            if suffix is not None:
+                memo[key] = [boundary, *suffix]
+                return memo[key]
+
+        memo[key] = None
+        return None
+
+    boundaries = search(rank=1, previous_boundary=0)
+    if boundaries is None:
+        return None
+
+    starts = [0, *boundaries]
+    ends = [*boundaries, num_layers]
+    partitions = [end - start for start, end in zip(starts, ends)]
+    if len(partitions) != pp_size or sum(partitions) != num_layers:
+        return None
+    return partitions
 
 
 def get_dsa_index_n_heads(config: PretrainedConfig) -> int:

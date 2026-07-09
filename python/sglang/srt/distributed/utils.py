@@ -99,21 +99,34 @@ def split_tensor_along_last_dim(
 
 
 def get_pp_indices(
-    num_hidden_layers: int, pp_rank: int, pp_size: int
+    num_hidden_layers: int,
+    pp_rank: int,
+    pp_size: int,
+    partition_list: Optional[Sequence[int]] = None,
 ) -> Tuple[int, int]:
     """Try to evenly distribute layers across partitions.
     If the number of layers is not divisible by the number of partitions,
     the last N partitions will have one extra layer, where N = remainder.
     """
-    # partition_list_str can be set to None in sglang
-    partition_list_str = os.getenv("SGLANG_PP_LAYER_PARTITION", None)
-    if partition_list_str is not None:
+    if partition_list is not None:
         try:
-            partitions = [int(layer) for layer in partition_list_str.split(",")]
-        except ValueError as err:
-            raise ValueError(
-                "Invalid partition string: {}".format(partition_list_str)
-            ) from err
+            partitions = [int(layer) for layer in partition_list]
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Invalid partition list: {partition_list}") from err
+    else:
+        # partition_list_str can be set to None in sglang
+        partition_list_str = os.getenv("SGLANG_PP_LAYER_PARTITION", None)
+        if partition_list_str is not None:
+            try:
+                partitions = [int(layer) for layer in partition_list_str.split(",")]
+            except ValueError as err:
+                raise ValueError(
+                    "Invalid partition string: {}".format(partition_list_str)
+                ) from err
+        else:
+            partitions = None
+
+    if partitions is not None:
         if len(partitions) != pp_size:
             raise ValueError(f"{len(partitions)=} does not match {pp_size=}.")
         if sum(partitions) != num_hidden_layers:
